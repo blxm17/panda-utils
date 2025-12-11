@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Server struct {
@@ -41,15 +42,20 @@ func (s *Server) HandleMsgQueue() {
 }
 
 func (s *Server) Broadcast(user *User, m string) {
-	sendMsg := "[" + user.Addr + "]" + user.Name + ":" + m
+	sendMsg := "[" + user.Addr + "] " + user.Name + ":  " + m
 
 	s.MsgQueue <- sendMsg
 }
 
 func (s *Server) HandleUser(conn net.Conn) {
+
+	defer conn.Close()
+
 	u := NewUser(conn, s)
 
 	u.Online()
+
+	isLive := make(chan bool)
 
 	go func() {
 		buf := make([]byte, 4096)
@@ -62,14 +68,39 @@ func (s *Server) HandleUser(conn net.Conn) {
 
 			if err != nil && err != io.EOF {
 				fmt.Println("Failed to read message from connection:", err)
+				u.Offline()
 				return
 			}
 			m := strings.TrimSpace(string(buf[:n]))
 			u.OnMessage(m)
+
+			select {
+			case isLive <- true:
+			default:
+			}
 		}
 	}()
 
-	select {}
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-isLive:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(10 * time.Second)
+		case <-timer.C:
+			u.SendMsg("you are inactive for 10 seconds. kickoff")
+			close(u.MsgChan)
+			u.Offline()
+			return
+		}
+	}
 }
 
 func (s *Server) Start() {

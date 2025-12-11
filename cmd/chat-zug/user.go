@@ -1,6 +1,9 @@
 package main
 
-import "net"
+import (
+	"net"
+	"strings"
+)
 
 type User struct {
 	Name    string
@@ -43,8 +46,35 @@ func (user *User) Offline() {
 	user.server.Broadcast(user, "offline")
 }
 
+func (user *User) SendMsg(msg string) {
+	user.conn.Write([]byte(msg))
+}
+
 func (user *User) OnMessage(msg string) {
-	user.server.Broadcast(user, msg)
+	if msg == "who" {
+		user.server.mapLock.Lock()
+		for _, u := range user.server.UserMap {
+			iden := "[" + u.Addr + "]" + u.Name + ": online\n"
+			user.SendMsg(iden)
+		}
+		user.server.mapLock.Unlock()
+	} else if len(msg) > 7 && msg[:7] == "rename|" {
+		newName := strings.Split(msg, "|")[1]
+		_, ok := user.server.UserMap[newName]
+		if ok {
+			user.SendMsg("user name is already in use")
+		} else {
+			user.server.mapLock.Lock()
+			delete(user.server.UserMap, user.Name)
+			user.server.UserMap[newName] = user
+			user.server.mapLock.Unlock()
+
+			user.Name = newName
+			user.SendMsg("user name changed to" + newName + " successfully\n")
+		}
+	} else {
+		user.server.Broadcast(user, msg)
+	}
 }
 
 func (user *User) ListenMsg() {
