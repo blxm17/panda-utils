@@ -83,16 +83,16 @@ func parseFlags() *Config {
 	config := &Config{}
 
 	flag.StringVar(&config.URL, "url", "", "Base URL with variables like {id} or :id (required, must include protocol and port if needed)")
-	flag.StringVar(&config.Method, "method", "GET", "HTTP method: GET, POST, PUT, DELETE, PATCH, default is GET")
-	flag.IntVar(&config.RPS, "rps", 10, "Requests per second, default is 10")
-	flag.IntVar(&config.Duration, "duration", 60, "Test duration in seconds, default is 60 seconds")
-	flag.IntVar(&config.Concurrency, "concurrency", 10, "Number of concurrent workers, default is 10")
+	flag.StringVar(&config.Method, "method", "GET", "HTTP method: GET, POST, PUT, DELETE, PATCH")
+	flag.IntVar(&config.RPS, "rps", 10, "Requests per second")
+	flag.IntVar(&config.Duration, "duration", 60, "Test duration in seconds")
+	flag.IntVar(&config.Concurrency, "concurrency", 10, "Number of concurrent workers")
 	flag.StringVar(&config.Body, "body", "", "Request body (JSON format)")
 	flag.StringVar(&config.PathParams, "path-params", "", "Path parameters to replace in URL (format: id=123 or id=1-100)")
 	flag.StringVar(&config.QueryParams, "query", "", "Query parameters (format: key1=value1&key2=value2)")
 	flag.StringVar(&config.Headers, "headers", "", "HTTP headers (format: Content-Type:application/json,Authorization:Bearer xxx)")
 	flag.BoolVar(&config.Insecure, "insecure", false, "Disable TLS certificate verification")
-	flag.IntVar(&config.Timeout, "timeout", 10, "Request timeout in seconds, default is 10 seconds")
+	flag.IntVar(&config.Timeout, "timeout", 10, "Request timeout in seconds")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
