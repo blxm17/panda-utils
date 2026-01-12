@@ -401,11 +401,18 @@ func updateStats(stats *ResponseStats, result *Result) {
 
 	atomic.AddInt64(&stats.TotalRequests, 1)
 
+	// 每1000个请求打印一次进度
+	// Use atomic.LoadInt64 to safely read the atomic value
+	total := atomic.LoadInt64(&stats.TotalRequests)
+	if total > 0 && total%1000 == 0 {
+		log.Printf("Progress: %d requests completed, last URL: %s", total, result.RequestURL)
+	}
+
 	if result.Error != nil {
 		atomic.AddInt64(&stats.ErrorCount, 1)
 		errorMsg := result.Error.Error()
-		if len(errorMsg) > 50 {
-			errorMsg = errorMsg[:50] + "..."
+		if len(errorMsg) > 500 {
+			errorMsg = errorMsg[:500] + "..."
 		}
 		stats.ErrorMessages[errorMsg]++
 		return
@@ -438,13 +445,6 @@ func updateStats(stats *ResponseStats, result *Result) {
 
 	if latencyMs > stats.MaxLatency {
 		stats.MaxLatency = latencyMs
-	}
-
-	// 每1000个请求打印一次进度
-	// Use atomic.LoadInt64 to safely read the atomic value
-	total := atomic.LoadInt64(&stats.TotalRequests)
-	if total > 0 && total%1000 == 0 {
-		log.Printf("Progress: %d requests completed, last URL: %s", total, result.RequestURL)
 	}
 }
 
