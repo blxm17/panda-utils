@@ -40,6 +40,8 @@ type ResponseStats struct {
 	MaxLatency    int64
 	StatusCodes   map[int]int64
 	ErrorMessages map[string]int64
+	StartTime     time.Time
+	EndTime       time.Time
 	mu            sync.RWMutex
 }
 
@@ -290,11 +292,8 @@ func runLoadTest(config *Config, client *http.Client, pathParams map[string][]st
 	baseRPS := config.RPS / config.Concurrency
 	remainder := config.RPS % config.Concurrency
 
-	stopChan := make(chan struct{})
-	go func() {
-		time.Sleep(time.Duration(config.Duration) * time.Second)
-		close(stopChan)
-	}()
+	// Use a start signal to synchronize all workers
+	startChan := make(chan struct{})
 
 	var wg sync.WaitGroup
 	for i := 0; i < config.Concurrency; i++ {
@@ -306,39 +305,66 @@ func runLoadTest(config *Config, client *http.Client, pathParams map[string][]st
 		// Only start worker if it has RPS > 0
 		if workerRPS > 0 {
 			wg.Add(1)
-			go worker(i, config, client, pathParams, workerRPS, stopChan, &wg, stats)
+			go worker(i, config, client, pathParams, workerRPS, startChan, &wg, stats)
 		}
 	}
 
+	// Record start time and signal all workers to start simultaneously
+	stats.StartTime = time.Now()
+	close(startChan)
+
+	// Wait for all workers to finish their scheduled requests
 	wg.Wait()
+	stats.EndTime = time.Now()
+
 	return stats
 }
 
-func worker(id int, config *Config, client *http.Client, pathParams map[string][]string, rps int, stopChan <-chan struct{}, wg *sync.WaitGroup, stats *ResponseStats) {
+func worker(id int, config *Config, client *http.Client, pathParams map[string][]string, rps int, startChan <-chan struct{}, wg *sync.WaitGroup, stats *ResponseStats) {
 	defer wg.Done()
+
+	// Wait for start signal to synchronize all workers
+	<-startChan
 
 	// Each worker starts with a different offset to distribute parameter values across workers
 	// This ensures different workers use different parameter values from the start
 	requestIndex := id
-	ticker := time.NewTicker(time.Second / time.Duration(rps))
+
+	// Calculate total requests this worker should make
+	totalRequests := rps * config.Duration
+	interval := time.Second / time.Duration(rps)
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			req, finalURL, err := createRequest(config, requestIndex, pathParams)
+	requestsSent := 0
+	var requestWg sync.WaitGroup
+
+	for requestsSent < totalRequests {
+		<-ticker.C
+
+		// Capture current requestIndex for this iteration
+		currentIndex := requestIndex
+		requestIndex++
+		requestsSent++
+
+		// Do everything asynchronously to not block the ticker
+		requestWg.Add(1)
+		go func(idx int) {
+			defer requestWg.Done()
+
+			req, finalURL, err := createRequest(config, idx, pathParams)
 			if err != nil {
 				log.Printf("Worker %d: Failed to create request: %v", id, err)
-				continue
+				return
 			}
 
 			sendRequest(client, req, finalURL, stats)
-			requestIndex++
-
-		case <-stopChan:
-			return
-		}
+		}(currentIndex)
 	}
+
+	// Wait for all in-flight requests to complete
+	requestWg.Wait()
 }
 
 func sendRequest(client *http.Client, req *http.Request, finalURL string, stats *ResponseStats) {
@@ -426,15 +452,18 @@ func printResults(stats *ResponseStats, duration int) {
 	stats.mu.RLock()
 	defer stats.mu.RUnlock()
 
+	actualDuration := stats.EndTime.Sub(stats.StartTime).Seconds()
+
 	fmt.Println("\n" + strings.Repeat("=", 60))
 	fmt.Println("LOAD TEST RESULTS")
 	fmt.Println(strings.Repeat("=", 60))
-	fmt.Printf("Test Duration:      %d seconds\n", duration)
-	fmt.Printf("Total Requests:     %d\n", stats.TotalRequests)
-	if duration > 0 {
-		fmt.Printf("Requests/sec:       %.2f\n", float64(stats.TotalRequests)/float64(duration))
+	fmt.Printf("Configured Duration: %d seconds\n", duration)
+	fmt.Printf("Actual Duration:     %.2f seconds\n", actualDuration)
+	fmt.Printf("Total Requests:      %d\n", stats.TotalRequests)
+	if actualDuration > 0 {
+		fmt.Printf("Requests/sec:        %.2f\n", float64(stats.TotalRequests)/actualDuration)
 	} else {
-		fmt.Printf("Requests/sec:       N/A (duration is 0)\n")
+		fmt.Printf("Requests/sec:        N/A (duration is 0)\n")
 	}
 
 	if stats.TotalRequests > 0 {
